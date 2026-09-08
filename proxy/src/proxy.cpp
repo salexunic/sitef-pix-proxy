@@ -42,7 +42,6 @@ static char g_dllDir[MAX_PATH] = "";
 enum St { S_IDLE, S_CONNECT, S_POLL, S_DONE };
 static St g_st = S_IDLE;
 static bool g_active = false, g_forwardMode = false, g_handledTransaction = false;
-static int g_lastFunc = 0;
 static long g_amountCents = 0;
 static int g_terminalCode = SITEF_ERR;
 
@@ -116,9 +115,10 @@ static bool PixRecvLine(std::string& out) {
     for (;;) {
         int n = recv(g_sock, &c, 1, 0);
         if (n == 0) return false;         // EOF
-        if (n < 0) { if (WSAGetLastError() == WSAETIMEDOUT) return false; continue; }
+        if (n < 0) return false;          // qualquer erro (timeout, reset, etc.) aborta
         if (c == '\n') break;
         out.push_back(c);
+        if (out.size() >= 4096) return false;
     }
     return !out.empty();
 }
@@ -197,7 +197,7 @@ IniciaFuncaoSiTefInterativo(int function, char* value, char* receipt, char* date
         g_forwardMode = (ret == SITEF_MOREDATA);
         return ret;
     }
-    g_handledTransaction = true; g_active = true; g_forwardMode = false; g_lastFunc = function;
+    g_handledTransaction = true; g_active = true; g_forwardMode = false;
     ParseAmount(value);
     g_terminalCode = SITEF_ERR; g_st = S_CONNECT;
     g_evCmd = 0; g_evFt = 0; g_evData.clear();
