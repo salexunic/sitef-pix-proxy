@@ -3,6 +3,7 @@
 #include <string>
 #include "pix_core.h"
 #include "protocol.h"
+#include "config.h"
 
 static int g_failures = 0;
 
@@ -61,11 +62,54 @@ static void testResp() {
     CHECK(respOk() == "OK\n");
 }
 
+static void testState() {
+    PixCore core;
+    DWORD t0 = 1000;
+
+    std::string tx = core.create("id1", 500, "12345678000199", t0);
+    Transaction o;
+    CHECK(core.status(tx, t0, &o));
+    CHECK(o.state == PixState::PEN);
+    CHECK(!o.qr.empty());
+
+    // auto-approve quando elapsed >= CFG_AUTO_APPROVE_MS
+    CHECK(core.status(tx, t0 + CFG_AUTO_APPROVE_MS, &o));
+    CHECK(o.state == PixState::APPROVED);
+    CHECK(o.auth.size() == 6);
+    CHECK(o.nsu.size() == 12);
+    CHECK(o.datetime.size() == 14);
+
+    // cancel
+    std::string tx2 = core.create("id2", 100, "12345678000199", t0);
+    CHECK(core.cancel(tx2) == OpResult::OK);
+    CHECK(core.status(tx2, t0, &o));
+    CHECK(o.state == PixState::CANCELED);
+
+    // pay manual (gatilho de teste)
+    std::string tx3 = core.create("id3", 200, "12345678000199", t0);
+    CHECK(core.pay(tx3) == OpResult::OK);
+    CHECK(core.status(tx3, t0, &o));
+    CHECK(o.state == PixState::APPROVED);
+
+    // timeout (ordem: timeout vence auto-approve)
+    std::string tx4 = core.create("id4", 300, "12345678000199", t0);
+    CHECK(core.status(tx4, t0 + CFG_TIMEOUT_MS, &o));
+    CHECK(o.state == PixState::TIMEOUT);
+
+    // txid inexistente
+    CHECK(!core.status("FFFFFFFFFFFFFFFF", t0, &o));
+    // pay em finalizada
+    CHECK(core.pay(tx) == OpResult::FINALIZED);
+    // cancel em finalizada
+    CHECK(core.cancel(tx3) == OpResult::FINALIZED);
+}
+
 int main() {
     testCrc();
     testQr();
     testParse();
     testResp();
+    testState();
     if (g_failures == 0) { printf("ALL TESTS PASSED\n"); return 0; }
     printf("%d FAILURES\n", g_failures);
     return 1;
