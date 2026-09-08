@@ -25,10 +25,17 @@ set "TEST=%ROOT%tests"
 set "OUT=%ROOT%build"
 if not exist "%OUT%" mkdir "%OUT%"
 
-echo [1/2] Compilando testes...
+echo [1/4] Compilando testes...
 cl.exe /nologo /std:c++20 /O2 /MT /W3 /EHsc /I"%SRC%" "%SRC%\protocol.cpp" "%SRC%\pix_core.cpp" "%TEST%\test_pix.cpp" /Fe:"%OUT%\pixcore_test.exe" /Fo:"%OUT%\\" /link /SUBSYSTEM:CONSOLE kernel32.lib
 if errorlevel 1 ( echo ERRO: compilacao teste falhou. & exit /b 1 )
 
-echo [2/2] Rodando testes...
+echo [2/4] Rodando testes...
 "%OUT%\pixcore_test.exe"
-exit /b %ERRORLEVEL%
+if errorlevel 1 ( echo ERRO: teste falhou. & exit /b 1 )
+
+echo [3/4] Compilando servidor...
+cl.exe /nologo /std:c++20 /O2 /MT /W3 /EHsc /I"%SRC%" "%SRC%\protocol.cpp" "%SRC%\pix_core.cpp" "%SRC%\server.cpp" "%SRC%\main.cpp" /Fe:"%OUT%\pixserver.exe" /Fo:"%OUT%\\" /link /SUBSYSTEM:CONSOLE ws2_32.lib kernel32.lib
+if errorlevel 1 ( echo ERRO: compilacao servidor falhou. & exit /b 1 )
+
+echo [4/4] OK.
+exit /b 0
