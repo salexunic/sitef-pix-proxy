@@ -2,6 +2,7 @@
 #include <cstring>
 #include <string>
 #include "pix_core.h"
+#include "protocol.h"
 
 static int g_failures = 0;
 
@@ -31,9 +32,40 @@ static void testQr() {
     CHECK(crcStr == std::string(want));
 }
 
+static void testParse() {
+    Command c;
+    CHECK(parseCommand("CREATE pedido1 1000 12345678000199", c));
+    CHECK(c.type == CmdType::CREATE);
+    CHECK(c.amountCents == 1000);
+    CHECK(c.cnpj == "12345678000199");
+    CHECK(parseCommand("STATUS 0123456789ABCDEF", c));
+    CHECK(c.type == CmdType::STATUS && c.txid == "0123456789ABCDEF");
+    CHECK(parseCommand("PAY 0123456789ABCDEF", c));
+    CHECK(c.type == CmdType::PAY);
+    CHECK(parseCommand("CANCEL 0123456789ABCDEF", c));
+    CHECK(c.type == CmdType::CANCEL);
+    // malformado: CREATE sem cnpj
+    CHECK(!parseCommand("CREATE so 1000", c));
+    // desconhecido
+    CHECK(parseCommand("FOO bar", c));
+    CHECK(c.type == CmdType::UNKNOWN);
+}
+
+static void testResp() {
+    CHECK(respOkCreate("0123456789ABCDEF", "00020126QR") == "OK 0123456789ABCDEF 00020126QR\n");
+    CHECK(respPen() == "PEN\n");
+    CHECK(respApproved("123456", "000000000001", "20260908103000") == "APPROVED 123456 000000000001 20260908103000\n");
+    CHECK(respErr(3, "not found") == "ERR 3 not found\n");
+    CHECK(respCanceled() == "CANCELED\n");
+    CHECK(respTimeout() == "TIMEOUT\n");
+    CHECK(respOk() == "OK\n");
+}
+
 int main() {
     testCrc();
     testQr();
+    testParse();
+    testResp();
     if (g_failures == 0) { printf("ALL TESTS PASSED\n"); return 0; }
     printf("%d FAILURES\n", g_failures);
     return 1;

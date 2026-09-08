@@ -26,7 +26,7 @@ set "OUT=%ROOT%build"
 if not exist "%OUT%" mkdir "%OUT%"
 
 echo [1/2] Compilando testes...
-cl.exe /nologo /std:c++20 /O2 /MT /W3 /EHsc /I"%SRC%" "%SRC%\pix_core.cpp" "%TEST%\test_pix.cpp" /Fe:"%OUT%\pixcore_test.exe" /Fo:"%OUT%\\" /link /SUBSYSTEM:CONSOLE kernel32.lib
+cl.exe /nologo /std:c++20 /O2 /MT /W3 /EHsc /I"%SRC%" "%SRC%\protocol.cpp" "%SRC%\pix_core.cpp" "%TEST%\test_pix.cpp" /Fe:"%OUT%\pixcore_test.exe" /Fo:"%OUT%\\" /link /SUBSYSTEM:CONSOLE kernel32.lib
 if errorlevel 1 ( echo ERRO: compilacao teste falhou. & exit /b 1 )
 
 echo [2/2] Rodando testes...
