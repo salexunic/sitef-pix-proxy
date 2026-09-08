@@ -1,4 +1,5 @@
 #include <cstdio>
+#include <cstring>
 #include <string>
 #include "pix_core.h"
 
@@ -13,8 +14,26 @@ static void testCrc() {
     CHECK(crc16Ccitt("") == 0xFFFF);
 }
 
+static void testQr() {
+    std::string qr = buildQrCode("0123456789ABCDEF", 1000, "PIX FAKE TEST", "SAO PAULO");
+    // comeca com 00 02 01 (payload format indicator)
+    CHECK(qr.rfind("000201", 0) == 0);
+    // contem o GUI do BCB e a chave (txid)
+    CHECK(qr.find("BR.GOV.BCB.PIX") != std::string::npos);
+    CHECK(qr.find("0123456789ABCDEF") != std::string::npos);
+    // termina com "6304" + 4 hex, e o CRC confere
+    CHECK(qr.size() > 8);
+    std::string payload = qr.substr(0, qr.size() - 4);
+    std::string crcStr  = qr.substr(qr.size() - 4);
+    unsigned short crc = crc16Ccitt(payload);
+    char want[8];
+    snprintf(want, sizeof(want), "%04X", crc);
+    CHECK(crcStr == std::string(want));
+}
+
 int main() {
     testCrc();
+    testQr();
     if (g_failures == 0) { printf("ALL TESTS PASSED\n"); return 0; }
     printf("%d FAILURES\n", g_failures);
     return 1;
