@@ -44,21 +44,25 @@ bool parseCommand(const std::string& line, Command& out) {
 
 std::string respOkCreate(const std::string& txid, const std::string& qr) {
     char b[4096]; int n = snprintf(b, sizeof(b), "OK %s %s\n", txid.c_str(), qr.c_str());
-    return std::string(b, n < 0 ? 0 : (size_t)n);
+    if (n < 0) n = 0; else if ((size_t)n >= sizeof(b)) n = (int)sizeof(b) - 1;
+    return std::string(b, (size_t)n);
 }
 std::string respErr(int code, const std::string& msg) {
     char b[512]; int n = snprintf(b, sizeof(b), "ERR %d %s\n", code, msg.c_str());
-    return std::string(b, n < 0 ? 0 : (size_t)n);
+    if (n < 0) n = 0; else if ((size_t)n >= sizeof(b)) n = (int)sizeof(b) - 1;
+    return std::string(b, (size_t)n);
 }
 std::string respPen() { return "PEN\n"; }
 std::string respApproved(const std::string& auth, const std::string& nsu, const std::string& datetime) {
     char b[256]; int n = snprintf(b, sizeof(b), "APPROVED %s %s %s\n", auth.c_str(), nsu.c_str(), datetime.c_str());
-    return std::string(b, n < 0 ? 0 : (size_t)n);
+    if (n < 0) n = 0; else if ((size_t)n >= sizeof(b)) n = (int)sizeof(b) - 1;
+    return std::string(b, (size_t)n);
 }
 std::string respCanceled() { return "CANCELED\n"; }
 std::string respDenied(const std::string& reason) {
     char b[256]; int n = snprintf(b, sizeof(b), "DENIED %s\n", reason.c_str());
-    return std::string(b, n < 0 ? 0 : (size_t)n);
+    if (n < 0) n = 0; else if ((size_t)n >= sizeof(b)) n = (int)sizeof(b) - 1;
+    return std::string(b, (size_t)n);
 }
 std::string respTimeout() { return "TIMEOUT\n"; }
 std::string respOk() { return "OK\n"; }
