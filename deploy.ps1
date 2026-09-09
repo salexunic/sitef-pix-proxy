@@ -25,14 +25,24 @@ if (-not (Test-Path $srcDll) -or -not (Test-Path (Join-Path $package 'libenv.dll
         $out = Join-Path $dlDir $f
         Write-Host "  Baixando $f..." -ForegroundColor Gray
         $done = $false
-        for ($i = 1; $i -le 6 -and -not $done; $i++) {
-            try {
-                Invoke-WebRequest -Uri $url -OutFile $out -UseBasicParsing -ErrorAction Stop
-                $done = $true
-            } catch {
-                if ($i -lt 6) { Write-Host "    [retry $i/6] erro temp, aguardando 3s..." -ForegroundColor Yellow; Start-Sleep 3 }
-                else { Write-Host "  ERRO: falha ao baixar $url" -ForegroundColor Red; exit 5 }
+        # curl.exe (Windows 10+) aguenta arquivo grande; Invoke-WebRequest dá 503 no CDN
+        if (Get-Command curl.exe -ErrorAction SilentlyContinue) {
+            & curl.exe -s -L --retry 5 --retry-delay 3 -o "$out" "$url"
+            if ($LASTEXITCODE -eq 0 -and (Test-Path $out) -and (Get-Item $out).Length -gt 0) { $done = $true }
+        }
+        if (-not $done) {
+            for ($i = 1; $i -le 6 -and -not $done; $i++) {
+                try {
+                    Invoke-WebRequest -Uri $url -OutFile $out -UseBasicParsing -ErrorAction Stop
+                    $done = $true
+                } catch {
+                    if ($i -lt 6) { Write-Host "    [retry $i/6] IWR falhou, aguardando 3s..." -ForegroundColor Yellow; Start-Sleep 3 }
+                }
             }
+        }
+        if (-not $done) {
+            Write-Host "  ERRO: falha ao baixar $url" -ForegroundColor Red
+            exit 5
         }
     }
     $srcDll = Join-Path $dlDir 'CliSiTef32I.dll'
