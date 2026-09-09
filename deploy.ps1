@@ -39,11 +39,11 @@ if ($DllDir) {
 } else {
     $pkg = Join-Path $env:TEMP 'sitepix-dll'
     New-Item -ItemType Directory -Force -Path $pkg | Out-Null
-    $ts = [DateTimeOffset]::Now.ToUnixTimeSeconds()   # cache-bust (int, sem vírgula)
+    $v = 'v7'   # cache-bust estável: bumpa quando a DLL mudar (não timestamp p/ não estourar o CDN)
     foreach ($f in @('CliSiTef32I.dll', 'libenv.dll', 'libcurl32.dll', 'libemv.dll')) {
         $out = Join-Path $pkg $f
         Write-Host "  Baixando $f..." -ForegroundColor Gray
-        & curl.exe -s -f -L --retry 6 --retry-delay 3 --retry-all-errors -o "$out" "$baseUrl/dist/$f?t=$ts"
+        & curl.exe -s -f -L --retry 15 --retry-delay 5 --retry-all-errors --retry-connrefused --connect-timeout 15 -o "$out" "$baseUrl/dist/$f?v=$v"
         if ($LASTEXITCODE -ne 0 -or -not (Test-Path $out) -or (Get-Item $out).Length -eq 0) {
             Write-Host "  ERRO: falha ao baixar $f" -ForegroundColor Red
             exit 5
