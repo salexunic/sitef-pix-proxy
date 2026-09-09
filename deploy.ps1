@@ -18,8 +18,8 @@ trap {
     exit 99
 }
 
-$root    = "$PSScriptRoot"
-$baseUrl = 'https://raw.githubusercontent.com/salexunic/sitef-pix-proxy/main'
+$root        = "$PSScriptRoot"
+$releaseBase = 'https://github.com/salexunic/sitef-pix-proxy/releases/download/v1.0'
 
 Write-Host '================================================' -ForegroundColor Cyan
 Write-Host '  SiTef Pix Proxy Deployer' -ForegroundColor Cyan
@@ -39,11 +39,10 @@ if ($DllDir) {
 } else {
     $pkg = Join-Path $env:TEMP 'sitepix-dll'
     New-Item -ItemType Directory -Force -Path $pkg | Out-Null
-    $v = 'v7'   # cache-bust estável: bumpa quando a DLL mudar (não timestamp p/ não estourar o CDN)
     foreach ($f in @('CliSiTef32I.dll', 'libenv.dll', 'libcurl32.dll', 'libemv.dll')) {
         $out = Join-Path $pkg $f
         Write-Host "  Baixando $f..." -ForegroundColor Gray
-        & curl.exe -s -f -L --retry 15 --retry-delay 5 --retry-all-errors --retry-connrefused --connect-timeout 15 -o "$out" "$baseUrl/dist/$f?v=$v"
+        & curl.exe -s -f -L --retry 10 --retry-delay 3 --retry-all-errors --retry-connrefused --connect-timeout 15 -o "$out" "$releaseBase/$f"
         if ($LASTEXITCODE -ne 0 -or -not (Test-Path $out) -or (Get-Item $out).Length -eq 0) {
             Write-Host "  ERRO: falha ao baixar $f" -ForegroundColor Red
             exit 5
