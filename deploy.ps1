@@ -24,11 +24,15 @@ if ($BaseUrl) {
         $url = "$BaseUrl/dist/$f"
         $out = Join-Path $dlDir $f
         Write-Host "  Baixando $f..." -ForegroundColor Gray
-        try {
-            Invoke-WebRequest -Uri $url -OutFile $out -UseBasicParsing -ErrorAction Stop
-        } catch {
-            Write-Host "  ERRO: falha ao baixar $url" -ForegroundColor Red
-            exit 5
+        $done = $false
+        for ($i = 1; $i -le 6 -and -not $done; $i++) {
+            try {
+                Invoke-WebRequest -Uri $url -OutFile $out -UseBasicParsing -ErrorAction Stop
+                $done = $true
+            } catch {
+                if ($i -lt 6) { Write-Host "    [retry $i/6] erro temp, aguardando 3s..." -ForegroundColor Yellow; Start-Sleep 3 }
+                else { Write-Host "  ERRO: falha ao baixar $url" -ForegroundColor Red; exit 5 }
+            }
         }
     }
     $srcDll = Join-Path $dlDir 'CliSiTef32I.dll'
