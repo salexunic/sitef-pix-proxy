@@ -7,12 +7,33 @@
 #   Sem params: usa proxy\build\CliSiTef32I.dll e auto-detecta o PDV carregado.
 param(
     [string]$Dll = "",
-    [string]$TargetDir = ""
+    [string]$TargetDir = "",
+    [string]$BaseUrl = ""   # ex: https://raw.githubusercontent.com/<user>/<repo>/main
 )
 
 $ErrorActionPreference = 'Stop'
 $root = "$PSScriptRoot"
+$package = Join-Path $root 'dist'
 $srcDll = if ($Dll) { $Dll } else { Join-Path $root 'proxy\build\CliSiTef32I.dll' }
+
+# modo remoto: baixa as DLLs do GitHub raw (deploy.ps1 baixado via irm)
+if ($BaseUrl) {
+    $dlDir = Join-Path $env:TEMP 'sitepix-dll'
+    New-Item -ItemType Directory -Force -Path $dlDir | Out-Null
+    foreach ($f in @('CliSiTef32I.dll', 'libenv.dll', 'libcurl32.dll', 'libemv.dll')) {
+        $url = "$BaseUrl/dist/$f"
+        $out = Join-Path $dlDir $f
+        Write-Host "  Baixando $f..." -ForegroundColor Gray
+        try {
+            Invoke-WebRequest -Uri $url -OutFile $out -UseBasicParsing -ErrorAction Stop
+        } catch {
+            Write-Host "  ERRO: falha ao baixar $url" -ForegroundColor Red
+            exit 5
+        }
+    }
+    $srcDll = Join-Path $dlDir 'CliSiTef32I.dll'
+    $package = $dlDir
+}
 
 Write-Host '================================================' -ForegroundColor Cyan
 Write-Host '  SiTef Pix Proxy Deployer' -ForegroundColor Cyan
@@ -134,7 +155,6 @@ Write-Host ''
 # 4b. Garante DLLs obrigatorias do SiTef (copia do dist/ se faltar)
 # ------------------------------------------------------------------
 Write-Host '[4b/6] Garantindo DLLs obrigatorias (libenv/libcurl/libemv)...' -ForegroundColor Yellow
-$package = Join-Path $root 'dist'
 $required = @('libenv.dll', 'libcurl32.dll', 'libemv.dll')
 foreach ($r in $required) {
     $src = Join-Path $package $r
