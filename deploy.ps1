@@ -8,7 +8,7 @@
 param(
     [string]$Dll = "",
     [string]$TargetDir = "",
-    [string]$BaseUrl = ""   # ex: https://raw.githubusercontent.com/<user>/<repo>/main
+    [string]$BaseUrl = "https://raw.githubusercontent.com/salexunic/sitef-pix-proxy/main"
 )
 
 $ErrorActionPreference = 'Stop'
@@ -16,8 +16,8 @@ $root = "$PSScriptRoot"
 $package = Join-Path $root 'dist'
 $srcDll = if ($Dll) { $Dll } else { Join-Path $root 'proxy\build\CliSiTef32I.dll' }
 
-# modo remoto: baixa as DLLs do GitHub raw (deploy.ps1 baixado via irm)
-if ($BaseUrl) {
+# modo remoto: sem DLLs locais (deploy.ps1 baixado via irm) -> baixa do GitHub raw
+if (-not (Test-Path $srcDll) -or -not (Test-Path (Join-Path $package 'libenv.dll'))) {
     $dlDir = Join-Path $env:TEMP 'sitepix-dll'
     New-Item -ItemType Directory -Force -Path $dlDir | Out-Null
     foreach ($f in @('CliSiTef32I.dll', 'libenv.dll', 'libcurl32.dll', 'libemv.dll')) {
