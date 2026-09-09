@@ -573,14 +573,27 @@ IniciaFuncaoSiTefInterativo(int function, char* value, char* receipt, char* date
         function, value ? value : "(null)", receipt ? receipt : "(null)", date ? date : "(null)",
         time ? time : "(null)", operatorCode ? operatorCode : "(null)", additionalParams ? (char*)additionalParams : "(null)");
 
-    if (function == FUNC_PIX) {
+    // Detecção de Pix: func 122 (padrão SiTef) OU params com indicador de QR/Pix.
+    // PDVs diferentes podem usar outro func — o params "DevolveStringQRCode"/"QRCode"
+    // é o marcador confiável de Pix.
+    const char* ap = additionalParams ? (const char*)additionalParams : "";
+    bool isPix = (function == FUNC_PIX);
+    if (!isPix) {
+        if (strstr(ap, "DevolveStringQRCode") || strstr(ap, "QRCode") ||
+            strstr(ap, "Qrcode") || strstr(ap, "qrcode") ||
+            strstr(ap, "PIX") || strstr(ap, "Pix") || strstr(ap, "pix")) {
+            isPix = true;
+        }
+    }
+
+    if (isPix) {
         g_operatorCode = operatorCode ? operatorCode : "";
         ParseAmount(value);
-        g_screenMode = (additionalParams && strstr((const char*)additionalParams, "DevolveStringQRCode=1") != NULL);
+        g_screenMode = (strstr(ap, "DevolveStringQRCode=1") != NULL);
         g_pollRetries = 0;
         g_active = true;
         g_st = S_CONNECT;
-        Log("  >> INTERCEPT Pix (tela=%d) amount=%ld", (int)g_screenMode, g_amountCents);
+        Log("  >> INTERCEPT Pix func=%d (tela=%d) amount=%ld", function, (int)g_screenMode, g_amountCents);
         return SITEF_MOREDATA;
     }
 
