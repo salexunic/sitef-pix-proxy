@@ -1,20 +1,20 @@
 # deploy.ps1 — SiTef Pix Proxy Auto Deployer (sitef-pix-proxy)
-# Baseado no PROD-TEF-GO/deployer/deploy.ps1 (scan -> kill -> backup -> copia -> respawn).
-# Diferença: só troca a CliSiTef32I.dll (nossa proxy) e garante libenv/libcurl/libemv.
-# As DLLs vêm de dist/ (local) ou baixam do GitHub raw (curl.exe) quando roda remoto.
-#
-# Uso:  .\deploy.ps1                    (espera detectar o PDV)
-#       .\deploy.ps1 -TargetDir <pasta> (deploy direto, sem PDV rodando)
-param([string]$TargetDir = "")
+# Mesma estrutura do PROD-TEF-GO/deployer/deploy.ps1 (scan -> kill -> backup -> copia -> respawn).
+# Só troca a CliSiTef32I.dll (nossa proxy) e garante libenv/libcurl/libemv.
+# Uso: .\deploy.ps1 [-DllDir <pasta com as DLLs>]   (sem DllDir, baixa do GitHub raw via curl.exe)
+param([string]$DllDir = "")
 
 $ErrorActionPreference = 'Stop'
 trap {
     Write-Host ''
     Write-Host '================================================' -ForegroundColor Red
     Write-Host '  ERRO FATAL' -ForegroundColor Red
+    Write-Host '================================================' -ForegroundColor Red
     Write-Host "  $_" -ForegroundColor Red
     Write-Host "  Linha: $($_.InvocationInfo.ScriptLineNumber)" -ForegroundColor Red
-    Write-Host '================================================' -ForegroundColor Red
+    Write-Host ''
+    Write-Host 'Pressione qualquer tecla para sair...'
+    $null = $Host.UI.RawUI.ReadKey('NoEcho,IncludeKeyDown')
     exit 99
 }
 
@@ -27,11 +27,13 @@ Write-Host '================================================' -ForegroundColor C
 Write-Host ''
 
 # ------------------------------------------------------------------
-# 1. Resolve as DLLs: dist/ local OU baixa do GitHub raw (curl.exe)
+# 1. Resolve as DLLs: -DllDir | dist/ local | download (curl.exe)
 # ------------------------------------------------------------------
 Write-Host '[1/7] Preparando DLLs...' -ForegroundColor Yellow
-$localDll = Join-Path $root 'dist\CliSiTef32I.dll'
-if (Test-Path $localDll) {
+if ($DllDir) {
+    $pkg = $DllDir
+    Write-Host "  Pacote (DllDir): $pkg" -ForegroundColor Gray
+} elseif (Test-Path (Join-Path $root 'dist\CliSiTef32I.dll')) {
     $pkg = Join-Path $root 'dist'
     Write-Host "  Pacote local: $pkg" -ForegroundColor Gray
 } else {
@@ -46,68 +48,89 @@ if (Test-Path $localDll) {
             exit 5
         }
     }
-    Write-Host "  Pacote remoto: $pkg" -ForegroundColor Gray
+    Write-Host "  Pacote baixado: $pkg" -ForegroundColor Gray
 }
 Write-Host ''
 
 # ------------------------------------------------------------------
-# 2. Detecta o alvo (PDV carregado) ou usa -TargetDir
+# 2. Scan em loop — aguarda ate detectar PDV (Ctrl+C para sair)
 # ------------------------------------------------------------------
-Write-Host '[2/7] Detectando PDV...' -ForegroundColor Yellow
-$target = $null
-if ($TargetDir) {
-    $target = @{ DLL = (Join-Path $TargetDir 'CliSiTef32I.dll'); Exe = $null; Pid = $null; Proc = $null }
-    Write-Host "  Alvo fornecido: $TargetDir" -ForegroundColor Gray
-} else {
-    $attempt = 0
-    while (-not $target) {
-        $attempt++
-        $found = @()
-        Get-Process -ErrorAction SilentlyContinue | ForEach-Object {
-            $proc = $_
-            try {
-                foreach ($m in $proc.Modules) {
-                    if ($m.ModuleName -like '*CliSiTef*') {
-                        $found += [PSCustomObject]@{ Proc = $proc.ProcessName; Pid = $proc.Id; Exe = $proc.MainModule.FileName; DLL = $m.FileName }
+Write-Host '[2/7] Aguardando PDV... (Ctrl+C para cancelar)' -ForegroundColor Yellow
+$attempt = 0
+$found = @()
+while ($true) {
+    $attempt++
+    $found = @()
+    Get-Process -ErrorAction SilentlyContinue | ForEach-Object {
+        $proc = $_
+        try {
+            foreach ($m in $proc.Modules) {
+                if ($m.ModuleName -like '*CliSiTef*') {
+                    $found += [PSCustomObject]@{
+                        Processo   = $proc.ProcessName
+                        PID        = $proc.Id
+                        Executavel = $proc.MainModule.FileName
+                        DLL        = $m.FileName
                     }
                 }
-            } catch {}
-        }
-        if ($found.Count -gt 0) {
-            $f = $found[0]
-            $target = @{ DLL = $f.DLL; Exe = $f.Exe; Pid = $f.Pid; Proc = $f.Proc }
-            Write-Host "  PDV detectado: $($f.Proc) (PID $($f.Pid))" -ForegroundColor Green
-            Write-Host "  DLL alvo: $($f.DLL)" -ForegroundColor Gray
-        } else {
-            Write-Host "  [scan #$attempt] Nenhum PDV detectado. Abra o PDV, ou Ctrl+C e use -TargetDir. Re-tentando em 3s..." -ForegroundColor Yellow
-            Start-Sleep -Seconds 3
-        }
+            }
+        } catch {}
     }
+    if ($found.Count -gt 0) {
+        Write-Host ''
+        Write-Host "  PDV detectado! (scan #$attempt)" -ForegroundColor Green
+        break
+    }
+    Write-Host "  [scan #$attempt] Nenhum PDV detectado. Re-tentando em 3s..." -ForegroundColor Gray
+    Start-Sleep -Seconds 3
 }
-$dllPath = $target.DLL
-$dllName = Split-Path $dllPath -Leaf
-$destDir = Split-Path $dllPath -Parent
+
+Write-Host ''
+$found | Format-Table -AutoSize Processo, PID, Executavel, DLL
+Write-Host ''
+
+if ($found.Count -gt 1) {
+    Write-Host "$($found.Count) processos detectados. Usando o primeiro." -ForegroundColor Yellow
+}
+
+$target       = $found[0]
+$processName  = $target.Processo
+$targetPid    = $target.PID
+$exePath      = $target.Executavel
+$dllPath      = $target.DLL
+$dllName      = Split-Path $dllPath -Leaf
+$targetDir    = Split-Path $dllPath -Parent
+
+Write-Host '------------------------------------------------' -ForegroundColor Gray
+Write-Host "  Processo : $processName" -ForegroundColor White
+Write-Host "  PID      : $targetPid" -ForegroundColor White
+Write-Host "  EXE      : $exePath" -ForegroundColor White
+Write-Host "  DLL      : $dllName" -ForegroundColor White
+Write-Host "  Pasta    : $targetDir" -ForegroundColor White
+Write-Host '------------------------------------------------' -ForegroundColor Gray
 Write-Host ''
 
 # ------------------------------------------------------------------
-# 3. Mata o PDV
+# 3. Matar o processo do PDV
 # ------------------------------------------------------------------
-Write-Host '[3/7] Encerrando PDV...' -ForegroundColor Yellow
-if ($target.Pid) {
-    try {
-        Stop-Process -Id $target.Pid -Force -ErrorAction Stop
-        Start-Sleep -Seconds 3
-        if (Get-Process -Id $target.Pid -ErrorAction SilentlyContinue) {
-            Write-Host '  ERRO: nao consegui matar o processo. Feche o PDV manualmente.' -ForegroundColor Red
-            exit 2
-        }
-        Write-Host "  Processo $($target.Proc) encerrado." -ForegroundColor Green
-    } catch {
-        Write-Host "  ERRO ao matar: $_" -ForegroundColor Red
+Write-Host '[3/7] Encerrando processo...' -ForegroundColor Yellow
+try {
+    Stop-Process -Id $targetPid -Force -ErrorAction Stop
+    Start-Sleep -Seconds 3
+    $stillAlive = Get-Process -Id $targetPid -ErrorAction SilentlyContinue
+    if ($stillAlive) {
+        Write-Host "ERRO: Nao foi possivel matar $processName (PID $targetPid)" -ForegroundColor Red
+        Write-Host 'Feche o PDV manualmente e execute novamente.' -ForegroundColor Red
+        Write-Host 'Pressione qualquer tecla para sair...'
+        $null = $Host.UI.RawUI.ReadKey('NoEcho,IncludeKeyDown')
         exit 2
     }
-} else {
-    Write-Host '  PDV nao estava rodando (pula).' -ForegroundColor Gray
+    Write-Host "  Processo $processName encerrado." -ForegroundColor Green
+} catch {
+    Write-Host "ERRO ao matar processo: $_" -ForegroundColor Red
+    Write-Host 'Pressione qualquer tecla para sair...'
+    $null = $Host.UI.RawUI.ReadKey('NoEcho,IncludeKeyDown')
+    exit 2
 }
 Write-Host ''
 
@@ -116,39 +139,67 @@ Write-Host ''
 # ------------------------------------------------------------------
 Write-Host '[4/7] Backup da DLL atual...' -ForegroundColor Yellow
 if (Test-Path $dllPath) {
-    $ts = Get-Date -Format 'yyyyMMdd_HHmmss'
-    $backup = "$dllPath.bak-$ts"
-    Copy-Item $dllPath $backup -Force
-    Write-Host "  Backup: $backup" -ForegroundColor Green
+    $backupPath = "$dllPath.bkp"
+    Write-Host "  Origem : $dllPath" -ForegroundColor Gray
+    Write-Host "  Backup : $dllName.bkp" -ForegroundColor Gray
+    if (Test-Path $backupPath) { Remove-Item $backupPath -Force }
+    Rename-Item $dllPath $backupPath -Force
+    Write-Host '  Backup concluido.' -ForegroundColor Green
 } else {
-    Write-Host "  DLL atual nao encontrada em $dllPath (instalacao nova)." -ForegroundColor Yellow
+    Write-Host '  DLL atual nao encontrada no caminho esperado.' -ForegroundColor Yellow
+    Write-Host "  Caminho esperado: $dllPath" -ForegroundColor Yellow
+    Write-Host '  Prosseguindo com a instalacao das novas DLLs...' -ForegroundColor Yellow
 }
 Write-Host ''
 
 # ------------------------------------------------------------------
-# 5. Copia a proxy + garante libs (retry anti-lock)
+# 5. Instalar a proxy + garantir libs (retry anti-lock)
 # ------------------------------------------------------------------
 Write-Host '[5/7] Instalando DLLs...' -ForegroundColor Yellow
-function Copy-DllWithRetry($Source, $Dest, $Desc) {
-    if (-not (Test-Path $Source)) { Write-Host "  ERRO: $Desc nao encontrado no pacote!" -ForegroundColor Red; return $false }
-    for ($r = 1; $r -le 5; $r++) {
+
+if (-not (Test-Path $targetDir -PathType Container)) {
+    Write-Host "ERRO: Pasta destino nao existe: $targetDir" -ForegroundColor Red
+    Write-Host 'Pressione qualquer tecla para sair...'
+    $null = $Host.UI.RawUI.ReadKey('NoEcho,IncludeKeyDown')
+    exit 3
+}
+
+function Copy-DllWithRetry($Source, $Dest, $Description) {
+    if (-not (Test-Path $Source)) {
+        Write-Host "  ERRO: $Description nao encontrado no pacote!" -ForegroundColor Red
+        return $false
+    }
+    $maxRetries = 5
+    for ($retry = 1; $retry -le $maxRetries; $retry++) {
         try {
             if (Test-Path $Dest) { Remove-Item $Dest -Force -ErrorAction Stop }
             Copy-Item $Source $Dest -Force -ErrorAction Stop
-            Write-Host "  OK: $Desc ($((Get-Item $Dest).Length) bytes)" -ForegroundColor Green
+            $size = (Get-Item $Dest).Length
+            Write-Host "  OK: $Description ($size bytes)" -ForegroundColor Green
             return $true
         } catch {
-            if ($r -lt 5) { Write-Host "  [retry $r/5] $Desc lockado, aguardando 2s..." -ForegroundColor Yellow; Start-Sleep 2 }
-            else { Write-Host "  ERRO: $Desc — acesso negado apos 5 tentativas" -ForegroundColor Red; return $false }
+            if ($retry -lt $maxRetries) {
+                Write-Host "  [retry $retry/$maxRetries] $Description locked, aguardando 2s..." -ForegroundColor Yellow
+                Start-Sleep -Seconds 2
+            } else {
+                Write-Host "  ERRO: $Description -- acesso negado apos $maxRetries tentativas" -ForegroundColor Red
+                return $false
+            }
         }
     }
     return $false
 }
 
 $errors = @()
-if (-not (Copy-DllWithRetry (Join-Path $pkg 'CliSiTef32I.dll') $dllPath $dllName)) { $errors += $dllName }
+
+# nossa proxy
+if (-not (Copy-DllWithRetry (Join-Path $pkg 'CliSiTef32I.dll') (Join-Path $targetDir $dllName) $dllName)) {
+    $errors += $dllName
+}
+
+# libs obrigatorias (so copia se faltar)
 foreach ($r in @('libenv.dll', 'libcurl32.dll', 'libemv.dll')) {
-    $dst = Join-Path $destDir $r
+    $dst = Join-Path $targetDir $r
     if (-not (Test-Path $dst)) {
         if (-not (Copy-DllWithRetry (Join-Path $pkg $r) $dst $r)) { $errors += $r }
     } else {
@@ -158,19 +209,23 @@ foreach ($r in @('libenv.dll', 'libcurl32.dll', 'libemv.dll')) {
 Write-Host ''
 
 # ------------------------------------------------------------------
-# 6. Verificacao (checksum)
+# 6. Verificacao
 # ------------------------------------------------------------------
-Write-Host '[6/7] Verificando...' -ForegroundColor Yellow
+Write-Host '[6/7] Verificando instalacao...' -ForegroundColor Yellow
 $srcHash = (Get-FileHash (Join-Path $pkg 'CliSiTef32I.dll') -Algorithm SHA256).Hash
-$dstHash = (Get-FileHash $dllPath -Algorithm SHA256).Hash
+$dstHash = (Get-FileHash (Join-Path $targetDir $dllName) -Algorithm SHA256).Hash
 Write-Host "  SHA256 destino: $dstHash" -ForegroundColor Gray
 if ($srcHash -ne $dstHash) {
     Write-Host '  FALHA: checksum nao confere!' -ForegroundColor Red
     exit 4
 }
 Write-Host '  Checksum OK.' -ForegroundColor Green
+
 if ($errors.Count -gt 0) {
-    Write-Host "  ERROS: $($errors -join ', ') nao instalados!" -ForegroundColor Red
+    Write-Host ''
+    Write-Host "ERROS: $($errors -join ', ') nao foram instalados!" -ForegroundColor Red
+    Write-Host 'Pressione qualquer tecla para sair...'
+    $null = $Host.UI.RawUI.ReadKey('NoEcho,IncludeKeyDown')
     exit 3
 }
 Write-Host ''
@@ -178,14 +233,16 @@ Write-Host ''
 # ------------------------------------------------------------------
 # 7. Respawn do PDV
 # ------------------------------------------------------------------
-Write-Host '[7/7] Reabrindo PDV...' -ForegroundColor Yellow
-if ($target.Exe -and (Test-Path $target.Exe)) {
-    Start-Process -FilePath $target.Exe -WorkingDirectory (Split-Path $target.Exe -Parent)
-    Write-Host "  PDV iniciado: $($target.Exe)" -ForegroundColor Green
+Write-Host '[7/7] Iniciando PDV...' -ForegroundColor Yellow
+if ($exePath -and (Test-Path $exePath)) {
+    $exeDir = Split-Path $exePath -Parent
+    Start-Process -FilePath $exePath -WorkingDirectory $exeDir
+    Write-Host '  PDV iniciado.' -ForegroundColor Green
 } else {
-    Write-Host '  Abra o PDV manualmente pelo atalho.' -ForegroundColor Yellow
+    Write-Host '  AVISO: Executavel do PDV nao encontrado. Abra manualmente.' -ForegroundColor Yellow
 }
 Write-Host ''
 Write-Host '================================================' -ForegroundColor Cyan
-Write-Host '  Deploy concluido!' -ForegroundColor Green
+Write-Host '  Deploy concluido com sucesso!' -ForegroundColor Green
 Write-Host '================================================' -ForegroundColor Cyan
+Write-Host ''
