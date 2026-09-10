@@ -284,8 +284,9 @@ def start_monitor():
                 self.end_headers()
                 self.wfile.write(html)
             elif self.path.startswith('/blacklist'):
+                import html as html_mod
                 entries = sorted(load_blacklist())
-                rows = ''.join('<li>%s <button onclick="rem(\'%s\')">remover</button></li>' % (e, e) for e in entries)
+                rows = ''.join('<li>%s <button data-entry="%s">remover</button></li>' % (html_mod.escape(e), html_mod.escape(e)) for e in entries)
                 html = ('''<!doctype html><meta charset="utf-8"><title>Blacklist</title>
                 <h2>Blacklist (IP/hostname)</h2>
                 <ul>%s</ul>
@@ -295,6 +296,7 @@ def start_monitor():
                 </form>
                 <script>
                 function rem(e){fetch('/blacklist',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:'remove='+encodeURIComponent(e)}).then(()=>location.reload());}
+                document.querySelectorAll('button[data-entry]').forEach(function(b){b.addEventListener('click',function(){rem(b.getAttribute('data-entry'));});});
                 </script>''' % rows).encode('utf-8')
                 self.send_response(200)
                 self.send_header('Content-Type', 'text/html; charset=utf-8')
