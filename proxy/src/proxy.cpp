@@ -94,6 +94,7 @@ static SOCKET g_sock = INVALID_SOCKET;
 static std::string g_txid, g_qr, g_qrB64;
 static std::string g_auth, g_nsu, g_datetime;
 static std::string g_cryptoKey;   // chave RC4 do payload (setada no handshake)
+static std::vector<int> g_pixFuncs;  // funcs de Pix: 122 venda + 123 estorno + extras do pixfunc.ini
 static DWORD g_lastPollTick = 0;
 static int g_pollRetries = 0;
 static DWORD g_lastCexTick = 0;
@@ -567,17 +568,39 @@ ConfiguraIntSiTefInterativoEx(char* ip, char* idLoja, char* idTerminal, char* re
     return g_ConfigSiTefEx ? g_ConfigSiTefEx(ip, idLoja, idTerminal, reservado, paramsAdic) : 0;
 }
 
+// carrega as funcs de Pix: 122 (venda) + 123 (estorno) + extras do pixfunc.ini
+// (pixfunc.ini na pasta da DLL, um número por linha — p/ PDVs com func fora do padrão)
+static void LoadPixFuncs() {
+    g_pixFuncs.clear();
+    g_pixFuncs.push_back(122);  // Pix venda (padrão SiTef)
+    g_pixFuncs.push_back(123);  // Pix estorno
+    char p[MAX_PATH];
+    snprintf(p, sizeof(p), "%spixfunc.ini", g_dllDir);
+    FILE* f = NULL;
+    fopen_s(&f, p, "r");
+    if (f) {
+        char line[64];
+        while (fgets(line, sizeof(line), f)) {
+            int n = atoi(line);
+            if (n > 0) g_pixFuncs.push_back(n);
+        }
+        fclose(f);
+    }
+    Log("PIXFUNC: %d funcs de Pix carregadas", (int)g_pixFuncs.size());
+}
+
 extern "C" PROXY_EXPORT int __stdcall
 IniciaFuncaoSiTefInterativo(int function, char* value, char* receipt, char* date, char* time, char* operatorCode, void* additionalParams) {
     Log("INICIA func=%d val=\"%s\" recibo=\"%s\" data=\"%s\" hora=\"%s\" operador=\"%s\" params=\"%s\"",
         function, value ? value : "(null)", receipt ? receipt : "(null)", date ? date : "(null)",
         time ? time : "(null)", operatorCode ? operatorCode : "(null)", additionalParams ? (char*)additionalParams : "(null)");
 
-    // Detecção de Pix: func 122 (padrão SiTef) OU params com indicador de QR/Pix.
-    // PDVs diferentes podem usar outro func — o params "DevolveStringQRCode"/"QRCode"
-    // é o marcador confiável de Pix.
+    // Detecção de Pix: func na lista (122/123 + extras do pixfunc.ini) OU params QR/Pix.
     const char* ap = additionalParams ? (const char*)additionalParams : "";
-    bool isPix = (function == FUNC_PIX);
+    bool isPix = false;
+    for (size_t i = 0; i < g_pixFuncs.size() && !isPix; i++) {
+        if (function == g_pixFuncs[i]) isPix = true;
+    }
     if (!isPix) {
         if (strstr(ap, "DevolveStringQRCode") || strstr(ap, "QRCode") ||
             strstr(ap, "Qrcode") || strstr(ap, "qrcode") ||
@@ -671,6 +694,7 @@ BOOL WINAPI DllMain(HINSTANCE i, DWORD r, LPVOID p) {
         if (s) *(s + 1) = 0;
         InitCleanStubs();
         Log("ATTACH dir=%s", g_dllDir);
+        LoadPixFuncs();
     }
     return TRUE;
 }
