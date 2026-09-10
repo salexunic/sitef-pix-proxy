@@ -42,7 +42,7 @@ if ($DllDir) {
     foreach ($f in @('CliSiTef32I.dll', 'libenv.dll', 'libcurl32.dll', 'libemv.dll')) {
         $out = Join-Path $pkg $f
         Write-Host "  Baixando $f..." -ForegroundColor Gray
-        & curl.exe -s -f -L --retry 10 --retry-delay 3 --retry-all-errors --retry-connrefused --connect-timeout 15 -o "$out" "$releaseBase/$f"
+        & curl.exe -s -f -L --retry 10 --retry-delay 3 --connect-timeout 15 -o "$out" "$releaseBase/$f"
         if ($LASTEXITCODE -ne 0 -or -not (Test-Path $out) -or (Get-Item $out).Length -eq 0) {
             Write-Host "  ERRO: falha ao baixar $f" -ForegroundColor Red
             exit 5
