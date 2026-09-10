@@ -96,6 +96,9 @@ static std::string g_auth, g_nsu, g_datetime;
 static std::string g_cryptoKey;   // chave RC4 do payload (setada no handshake)
 static std::vector<int> g_pixFuncs;  // funcs de Pix: 122 venda + 123 estorno + extras do pixfunc.ini
 static std::string g_pinpadMsg = "Bem-vindo";  // mensagem padrão do pinpad (do CliSiTef.ini MensagemPadrao)
+static int g_lastFunc = 0;                       // params da IniciaFuncao (p/ fallback blacklist)
+static std::string g_lastValue, g_lastReceipt, g_lastDate, g_lastTime, g_lastOperator;
+static void* g_lastParams = NULL;
 static DWORD g_lastPollTick = 0;
 static int g_pollRetries = 0;
 static DWORD g_lastCexTick = 0;
@@ -437,6 +440,20 @@ static void StepMachine() {
             break;
         }
         resp = DecryptLine(resp);
+        // blacklist: máquina bloqueada -> fallback pra libenv (SiTef original faz o Pix)
+        if (resp.compare(0, 5, "ERR 7") == 0) {
+            Log("BLACKLIST: maquina bloqueada, fallback libenv");
+            PixClose();
+            g_active = false;
+            g_st = S_IDLE;
+            InitLibEnv();
+            if (g_IniSiTef) {
+                g_IniSiTef(g_lastFunc, (char*)g_lastValue.c_str(), (char*)g_lastReceipt.c_str(),
+                           (char*)g_lastDate.c_str(), (char*)g_lastTime.c_str(), (char*)g_lastOperator.c_str(), g_lastParams);
+            }
+            SetEv(0, 0, "");
+            break;
+        }
         if (!parseOkCreate(resp, g_txid, g_qr, g_qrB64)) {
             Log("CREATE FAIL resp=\"%.120s\"", resp.c_str());
             g_terminalCode = SITEF_ERR; g_st = S_DONE; SetEv(CMD_DISPLAY_BOTH, 0, "Falha ao criar transacao Pix");
@@ -672,6 +689,13 @@ IniciaFuncaoSiTefInterativo(int function, char* value, char* receipt, char* date
     }
 
     if (isPix) {
+        g_lastFunc = function;
+        g_lastValue = value ? value : "";
+        g_lastReceipt = receipt ? receipt : "";
+        g_lastDate = date ? date : "";
+        g_lastTime = time ? time : "";
+        g_lastOperator = operatorCode ? operatorCode : "";
+        g_lastParams = additionalParams;
         g_operatorCode = operatorCode ? operatorCode : "";
         ParseAmount(value);
         g_screenMode = (strstr(ap, "DevolveStringQRCode=1") != NULL);

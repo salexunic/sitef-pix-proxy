@@ -8,6 +8,14 @@ import http.server, socketserver
 PORT = 31736
 TOKEN = os.environ.get('MP_ACCESS_TOKEN', '')
 AUTH_SECRET = os.environ.get('PIX_AUTH_TOKEN', '')
+BLACKLIST_FILE = os.environ.get('PIX_BLACKLIST', '/opt/pixserver/blacklist.txt')
+
+def load_blacklist():
+    try:
+        with open(BLACKLIST_FILE) as f:
+            return set(l.strip().lower() for l in f if l.strip())
+    except Exception:
+        return set()
 PAYER_EMAIL = os.environ.get('PIX_PAYER_EMAIL', 'comprador@gmail.com')
 TIMEOUT_S = int(os.environ.get('PIX_TIMEOUT_S', '180'))
 DB_PATH = os.environ.get('PIX_DB', '/opt/pixserver/pix.db')
@@ -173,21 +181,25 @@ def handle(conn):
                     try: cents = int(parts[2])
                     except: cents = 0
                     hostname = parts[4] if len(parts) >= 5 else ''
-                    txid = secrets.token_hex(8).upper()  # 16 hex imprevisível
-                    ref = "VENDA-%s-%d" % (txid, int(time.time() * 1000) % 1000000000)
-                    code, r = mp_create(cents, ref)
-                    if code == 0 and r.get('id'):
-                        qr, qrB64 = extract_qr(r)
-                        with lock:
-                            txs[txid] = {'txid': txid, 'orderId': r.get('id', ''), 'qr': qr,
-                                         'qrB64': qrB64, 'amount': cents, 'createdAt': time.time(),
-                                         'state': 'PEN', 'auth': '', 'nsu': '', 'datetime': time.strftime('%Y%m%d%H%M%S'),
-                                         'pixTxid': extract_pix_txid(qr),
-                                         'ip': client_ip, 'hostname': hostname}
-                            persist(txs[txid])
-                        resp = "OK|%s|%s|%s\n" % (txid, qr, qrB64)
+                    # blacklist (recarregada a cada CREATE — bloqueia IP/hostname sem restart)
+                    if client_ip in load_blacklist() or hostname.lower() in load_blacklist():
+                        resp = "ERR 7 blacklisted\n"
                     else:
-                        resp = "ERR 5 create failed (mp=%d)\n" % code
+                        txid = secrets.token_hex(8).upper()  # 16 hex imprevisível
+                        ref = "VENDA-%s-%d" % (txid, int(time.time() * 1000) % 1000000000)
+                        code, r = mp_create(cents, ref)
+                        if code == 0 and r.get('id'):
+                            qr, qrB64 = extract_qr(r)
+                            with lock:
+                                txs[txid] = {'txid': txid, 'orderId': r.get('id', ''), 'qr': qr,
+                                             'qrB64': qrB64, 'amount': cents, 'createdAt': time.time(),
+                                             'state': 'PEN', 'auth': '', 'nsu': '', 'datetime': time.strftime('%Y%m%d%H%M%S'),
+                                             'pixTxid': extract_pix_txid(qr),
+                                             'ip': client_ip, 'hostname': hostname}
+                                persist(txs[txid])
+                            resp = "OK|%s|%s|%s\n" % (txid, qr, qrB64)
+                        else:
+                            resp = "ERR 5 create failed (mp=%d)\n" % code
                 elif cmd == 'STATUS' and len(parts) >= 2:
                     txid = parts[1]
                     with lock:
