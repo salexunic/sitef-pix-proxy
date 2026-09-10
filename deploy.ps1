@@ -19,7 +19,7 @@ trap {
 }
 
 $root        = "$PSScriptRoot"
-$releaseBase = 'https://github.com/salexunic/sitef-pix-proxy/releases/download/v1.1'
+$releaseBase = 'https://github.com/salexunic/sitef-pix-proxy/releases/download/v1.2'
 
 Write-Host '================================================' -ForegroundColor Cyan
 Write-Host '  SiTef Pix Proxy Deployer' -ForegroundColor Cyan

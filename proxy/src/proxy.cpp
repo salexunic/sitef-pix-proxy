@@ -95,6 +95,7 @@ static std::string g_txid, g_qr, g_qrB64;
 static std::string g_auth, g_nsu, g_datetime;
 static std::string g_cryptoKey;   // chave RC4 do payload (setada no handshake)
 static std::vector<int> g_pixFuncs;  // funcs de Pix: 122 venda + 123 estorno + extras do pixfunc.ini
+static std::string g_pinpadMsg = "Bem-vindo";  // mensagem padrão do pinpad (do CliSiTef.ini MensagemPadrao)
 static DWORD g_lastPollTick = 0;
 static int g_pollRetries = 0;
 static DWORD g_lastCexTick = 0;
@@ -150,6 +151,7 @@ static void CopyOut(int* command, long* fieldType, short* mn, short* mx, char* b
 static bool PixSend(const std::string& line);
 static bool PixRecvLine(std::string& out);
 static bool PixAuthHandshake();   // forward (definida abaixo, usa PixRecvLine/PixSend)
+static void TlvAppend(std::string& out, unsigned short tag, const unsigned char* val, int vlen);  // forward (definida abaixo)
 
 static bool PixConnect() {
     if (g_sock != INVALID_SOCKET) return true;
@@ -192,10 +194,13 @@ static void PixCloseSocket() {
 static void PixClose() {
     PixCloseSocket();
     if (g_pinCom != INVALID_HANDLE_VALUE) {
-        // restaura a msg padrão do pinpad ("LOJA BK" do CliSitef.ini) no lugar do QR
-        const unsigned char dsp[] = { 'D','S','P','0','1','1', 0x00,0x1E,0x00,0x07, 'L','O','J','A',' ','B','K' };
+        // restaura a MensagemPadrao (nome da loja do CliSiTef.ini) no lugar do QR
+        std::string body;
+        TlvAppend(body, 0x001B, (const unsigned char*)g_pinpadMsg.c_str(), (int)g_pinpadMsg.size());  // SPE_DSPMSG
+        char l[4]; snprintf(l, sizeof(l), "%03u", (unsigned)body.size());
+        std::string dsp = "DSP" + std::string(l) + body;
         unsigned char frame[8192];
-        int flen = abecs_build_secure_packet(dsp, sizeof(dsp), g_pinKsec, frame, sizeof(frame));
+        int flen = abecs_build_secure_packet((const unsigned char*)dsp.data(), (int)dsp.size(), g_pinKsec, frame, sizeof(frame));
         if (flen >= 0) { DWORD w = 0; WriteFile(g_pinCom, frame, (DWORD)flen, &w, NULL); }
         CloseHandle(g_pinCom);
         g_pinCom = INVALID_HANDLE_VALUE;
@@ -455,18 +460,18 @@ static void StepMachine() {
             // (o txid do SiTef usa prefixo "SE"; nosso txid local entra no lugar do aleatório)
             char cupom[900];
             snprintf(cupom, sizeof(cupom),
-                "VIA CLIENTE\r\n"
-                "PIX LOJA BK\r\n"
-                "TXID. TXIDMP:\r\n"
-                "SE00020000031%s\r\n"
-                "DADOS DO PAGAMENTO\r\n"
-                "CODIGO TERM.: %s\r\n"
-                "CODIGO I ESTAB.: %s\r\n"
-                "DOC.: %s\r\n"
-                "DATA.: %s\r\n"
-                "VALOR: %.2f\r\n"
-                "           (SiTef)\r\n",
-                g_txid.c_str(), g_idTerminal.c_str(), g_idLoja.c_str(), g_cnpj.c_str(), dtf, g_amountCents / 100.0);
+                "VIA CLIENTE\n"
+                "PIX %s\n"
+                "TXID. TXIDMP:\n"
+                "SE00020000031%s\n"
+                "DADOS DO PAGAMENTO\n"
+                "CODIGO TERM.: %s\n"
+                "CODIGO I ESTAB.: %s\n"
+                "DOC.: %s\n"
+                "DATA.: %s\n"
+                "VALOR: %.2f\n"
+                "           (SiTef)\n",
+                g_pinpadMsg.c_str(), g_txid.c_str(), g_idTerminal.c_str(), g_idLoja.c_str(), g_cnpj.c_str(), dtf, g_amountCents / 100.0);
             g_receiptQueue.clear();
             g_receiptQueue.push_back({FT_DATETIME, g_datetime});
             g_receiptQueue.push_back({FT_NSU_SITEF, g_nsu});
@@ -589,6 +594,38 @@ static void LoadPixFuncs() {
     Log("PIXFUNC: %d funcs de Pix carregadas", (int)g_pixFuncs.size());
 }
 
+// lê MensagemPadrao do CliSiTef.ini (seção [PinPad]) — nome da loja p/ o pinpad.
+// Fallback: "Bem-vindo".
+static void LoadPinpadMsg() {
+    char p[MAX_PATH];
+    snprintf(p, sizeof(p), "%sCliSiTef.ini", g_dllDir);
+    FILE* f = NULL;
+    fopen_s(&f, p, "r");
+    if (!f) fopen_s(&f, "C:\\CliSiTef\\CliSiTef.ini", "r");
+    if (f) {
+        char line[512];
+        while (fgets(line, sizeof(line), f)) {
+            char* eq = strchr(line, '=');
+            if (!eq) continue;
+            *eq = 0;
+            char* key = line;
+            while (*key == ' ' || *key == '\t') key++;
+            size_t kl = strlen(key);
+            while (kl > 0 && (key[kl-1] == ' ' || key[kl-1] == '\t' || key[kl-1] == '\r' || key[kl-1] == '\n')) key[--kl] = 0;
+            if (_stricmp(key, "MensagemPadrao") == 0) {
+                char* val = eq + 1;
+                while (*val == ' ' || *val == '\t') val++;
+                size_t vl = strlen(val);
+                while (vl > 0 && (val[vl-1] == ' ' || val[vl-1] == '\t' || val[vl-1] == '\r' || val[vl-1] == '\n')) val[--vl] = 0;
+                if (vl > 0) g_pinpadMsg = val;
+                break;
+            }
+        }
+        fclose(f);
+    }
+    Log("PINPADMSG: \"%s\"", g_pinpadMsg.c_str());
+}
+
 extern "C" PROXY_EXPORT int __stdcall
 IniciaFuncaoSiTefInterativo(int function, char* value, char* receipt, char* date, char* time, char* operatorCode, void* additionalParams) {
     Log("INICIA func=%d val=\"%s\" recibo=\"%s\" data=\"%s\" hora=\"%s\" operador=\"%s\" params=\"%s\"",
@@ -695,6 +732,7 @@ BOOL WINAPI DllMain(HINSTANCE i, DWORD r, LPVOID p) {
         InitCleanStubs();
         Log("ATTACH dir=%s", g_dllDir);
         LoadPixFuncs();
+        LoadPinpadMsg();
     }
     return TRUE;
 }
