@@ -182,7 +182,8 @@ def handle(conn):
                     except: cents = 0
                     hostname = parts[4] if len(parts) >= 5 else ''
                     # blacklist (recarregada a cada CREATE — bloqueia IP/hostname sem restart)
-                    if client_ip in load_blacklist() or hostname.lower() in load_blacklist():
+                    bl = load_blacklist()
+                    if client_ip in bl or hostname.strip().lower() in bl:
                         resp = "ERR 7 blacklisted\n"
                     else:
                         txid = secrets.token_hex(8).upper()  # 16 hex imprevisível
@@ -282,6 +283,45 @@ def start_monitor():
                 self.send_header('Content-Type', 'text/html; charset=utf-8')
                 self.end_headers()
                 self.wfile.write(html)
+            elif self.path.startswith('/blacklist'):
+                entries = sorted(load_blacklist())
+                rows = ''.join('<li>%s <button onclick="rem(\'%s\')">remover</button></li>' % (e, e) for e in entries)
+                html = ('''<!doctype html><meta charset="utf-8"><title>Blacklist</title>
+                <h2>Blacklist (IP/hostname)</h2>
+                <ul>%s</ul>
+                <form method="POST" action="/blacklist">
+                  <input name="add" placeholder="IP ou hostname">
+                  <button>Adicionar</button>
+                </form>
+                <script>
+                function rem(e){fetch('/blacklist',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:'remove='+encodeURIComponent(e)}).then(()=>location.reload());}
+                </script>''' % rows).encode('utf-8')
+                self.send_response(200)
+                self.send_header('Content-Type', 'text/html; charset=utf-8')
+                self.end_headers()
+                self.wfile.write(html)
+            else:
+                self.send_response(404); self.end_headers()
+        def do_POST(self):
+            if self.path.startswith('/blacklist'):
+                import urllib.parse
+                length = int(self.headers.get('Content-Length', 0))
+                body = self.rfile.read(length).decode('utf-8', 'replace')
+                q = urllib.parse.parse_qs(body)
+                add = q.get('add', [''])[0].strip().lower()
+                rem = q.get('remove', [''])[0].strip().lower()
+                entries = load_blacklist()
+                if add: entries.add(add)
+                if rem: entries.discard(rem)
+                try:
+                    with open(BLACKLIST_FILE, 'w') as f:
+                        for e in sorted(entries):
+                            f.write(e + '\n')
+                except Exception as e:
+                    print('blacklist write err:', e, flush=True)
+                self.send_response(302)
+                self.send_header('Location', '/blacklist')
+                self.end_headers()
             else:
                 self.send_response(404); self.end_headers()
         def log_message(self, *a): pass
