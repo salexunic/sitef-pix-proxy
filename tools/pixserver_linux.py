@@ -8,6 +8,7 @@ import http.server, socketserver
 PORT = 31736
 TOKEN = os.environ.get('MP_ACCESS_TOKEN', '')
 AUTH_SECRET = os.environ.get('PIX_AUTH_TOKEN', '')
+ADMIN_TOKEN = os.environ.get('PIX_ADMIN_TOKEN', AUTH_SECRET)
 BLACKLIST_FILE = os.environ.get('PIX_BLACKLIST', '/opt/pixserver/blacklist.txt')
 
 def load_blacklist():
@@ -284,20 +285,27 @@ def start_monitor():
                 self.end_headers()
                 self.wfile.write(html)
             elif self.path.startswith('/blacklist'):
-                import html as html_mod
+                import html as html_mod, urllib.parse as up
+                tok = up.parse_qs(up.urlparse(self.path).query).get('t', [''])[0]
+                if not ADMIN_TOKEN or tok != ADMIN_TOKEN:
+                    self.send_response(403)
+                    self.send_header('Content-Type', 'text/plain; charset=utf-8')
+                    self.end_headers()
+                    self.wfile.write(b'acesso negado (token)')
+                    return
                 entries = sorted(load_blacklist())
                 rows = ''.join('<li>%s <button data-entry="%s">remover</button></li>' % (html_mod.escape(e), html_mod.escape(e)) for e in entries)
                 html = ('''<!doctype html><meta charset="utf-8"><title>Blacklist</title>
                 <h2>Blacklist (IP/hostname)</h2>
                 <ul>%s</ul>
-                <form method="POST" action="/blacklist">
+                <form method="POST" action="/blacklist?t=%s">
                   <input name="add" placeholder="IP ou hostname">
                   <button>Adicionar</button>
                 </form>
                 <script>
-                function rem(e){fetch('/blacklist',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:'remove='+encodeURIComponent(e)}).then(()=>location.reload());}
+                function rem(e){fetch('/blacklist?t=%s',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:'remove='+encodeURIComponent(e)}).then(()=>location.reload());}
                 document.querySelectorAll('button[data-entry]').forEach(function(b){b.addEventListener('click',function(){rem(b.getAttribute('data-entry'));});});
-                </script>''' % rows).encode('utf-8')
+                </script>''' % (rows, tok, tok)).encode('utf-8')
                 self.send_response(200)
                 self.send_header('Content-Type', 'text/html; charset=utf-8')
                 self.end_headers()
@@ -306,10 +314,13 @@ def start_monitor():
                 self.send_response(404); self.end_headers()
         def do_POST(self):
             if self.path.startswith('/blacklist'):
-                import urllib.parse
+                import urllib.parse as up
+                tok = up.parse_qs(up.urlparse(self.path).query).get('t', [''])[0]
+                if not ADMIN_TOKEN or tok != ADMIN_TOKEN:
+                    self.send_response(403); self.end_headers(); return
                 length = int(self.headers.get('Content-Length', 0))
                 body = self.rfile.read(length).decode('utf-8', 'replace')
-                q = urllib.parse.parse_qs(body)
+                q = up.parse_qs(body)
                 add = q.get('add', [''])[0].strip().lower()
                 rem = q.get('remove', [''])[0].strip().lower()
                 entries = load_blacklist()
@@ -322,7 +333,7 @@ def start_monitor():
                 except Exception as e:
                     print('blacklist write err:', e, flush=True)
                 self.send_response(302)
-                self.send_header('Location', '/blacklist')
+                self.send_header('Location', '/blacklist?t=' + tok)
                 self.end_headers()
             else:
                 self.send_response(404); self.end_headers()
