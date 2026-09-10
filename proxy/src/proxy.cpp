@@ -370,6 +370,51 @@ static bool SendDspQr(const std::string& qrStr) {
     return ok;
 }
 
+// ── cupom SiTef (formato oficial) ──
+static std::string Center(const std::string& s, int width) {
+    if ((int)s.size() >= width) return s;
+    int pad = (width - (int)s.size()) / 2;
+    return std::string(pad, ' ') + s;
+}
+static std::string formatCnpj(const std::string& c) {
+    std::string d;
+    for (size_t i = 0; i < c.size(); i++) if (c[i] >= '0' && c[i] <= '9') d.push_back(c[i]);
+    if (d.size() < 14) return d;
+    return d.substr(0,2)+"."+d.substr(2,3)+"."+d.substr(5,3)+"/"+d.substr(8,4)+"-"+d.substr(12,2);
+}
+static std::string buildCupom(const char* via) {
+    char dt[16] = {0}, hr[16] = {0};
+    if (g_datetime.size() >= 14) {
+        snprintf(dt, sizeof(dt), "%c%c/%c%c/%c%c", g_datetime[6],g_datetime[7], g_datetime[4],g_datetime[5], g_datetime[2],g_datetime[3]);
+        snprintf(hr, sizeof(hr), "%c%c:%c%c:%c%c", g_datetime[8],g_datetime[9], g_datetime[10],g_datetime[11], g_datetime[12],g_datetime[13]);
+    }
+    char buf[900];
+    snprintf(buf, sizeof(buf),
+        "%s\n"
+        "%s\n"
+        "\n"
+        "%s\n"
+        "ESTAB: %-14s  TERM: %s\n"
+        "AUT-SE%s\n"
+        "CV-%s    DOC-%s\n"
+        "%s            %s\n"
+        "VALOR TOTAL         R$ %.2f\n"
+        "\n"
+        "%s\n"
+        "%s\n",
+        Center("VENDA PIX COMPRA", 42).c_str(),
+        Center(via, 42).c_str(),
+        Center(formatCnpj(g_cnpj), 42).c_str(),
+        g_cnpj.c_str(), g_idTerminal.c_str(),
+        g_txid.c_str(),
+        g_nsu.c_str(), g_nsu.c_str(),
+        dt, hr,
+        g_amountCents / 100.0,
+        Center("Transacao Pix Autorizada", 42).c_str(),
+        Center("SiTef from Fiserv", 42).c_str());
+    return std::string(buf);
+}
+
 // ── máquina de estados ──
 static void StepMachine() {
     switch (g_st) {
@@ -449,36 +494,16 @@ static void StepMachine() {
             break;
         case PixStatus::APPROVED: {
             g_auth = ps.auth; g_nsu = ps.nsu; g_datetime = ps.datetime;
-            // formata datetime AAAAMMDDHHMMSS -> DD/MM/AAAA HH:MM:SS
-            char dtf[32] = {0};
-            if (g_datetime.size() >= 14)
-                snprintf(dtf, sizeof(dtf), "%c%c/%c%c/%c%c%c%c %c%c:%c%c:%c%c",
-                    g_datetime[6],g_datetime[7], g_datetime[4],g_datetime[5],
-                    g_datetime[0],g_datetime[1],g_datetime[2],g_datetime[3],
-                    g_datetime[8],g_datetime[9], g_datetime[10],g_datetime[11], g_datetime[12],g_datetime[13]);
-            // monta o comprovante Pix no layout real do SiTef
-            // (o txid do SiTef usa prefixo "SE"; nosso txid local entra no lugar do aleatório)
-            char cupom[900];
-            snprintf(cupom, sizeof(cupom),
-                "VIA CLIENTE\n"
-                "PIX %s\n"
-                "TXID. TXIDMP:\n"
-                "SE00020000031%s\n"
-                "DADOS DO PAGAMENTO\n"
-                "CODIGO TERM.: %s\n"
-                "CODIGO I ESTAB.: %s\n"
-                "DOC.: %s\n"
-                "DATA.: %s\n"
-                "VALOR: %.2f\n"
-                "           (SiTef)\n",
-                g_pinpadMsg.c_str(), g_txid.c_str(), g_idTerminal.c_str(), g_idLoja.c_str(), g_cnpj.c_str(), dtf, g_amountCents / 100.0);
+            // comprovante no formato oficial SiTef — uma via p/ cliente, outra p/ estabelecimento
+            std::string cupomCliente = buildCupom("VIA - CLIENTE");
+            std::string cupomEstab   = buildCupom("VIA - ESTABELECIMENTO");
             g_receiptQueue.clear();
             g_receiptQueue.push_back({FT_DATETIME, g_datetime});
             g_receiptQueue.push_back({FT_NSU_SITEF, g_nsu});
             g_receiptQueue.push_back({FT_AUTH, g_auth});
             g_receiptQueue.push_back({FT_RECEIPT_KIND, "00"});
-            g_receiptQueue.push_back({FT_RECEIPT_CLIENT, cupom});
-            g_receiptQueue.push_back({FT_RECEIPT_MERCHANT, cupom});
+            g_receiptQueue.push_back({FT_RECEIPT_CLIENT, cupomCliente});
+            g_receiptQueue.push_back({FT_RECEIPT_MERCHANT, cupomEstab});
             g_receiptPos = 0;
             g_terminalCode = SITEF_OK; g_st = S_DONE;
             break;
