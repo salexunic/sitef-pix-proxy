@@ -394,7 +394,7 @@ static std::string buildCupom(const char* via) {
         "%s\n"
         "\n"
         "%s\n"
-        "ESTAB: %-14s  TERM: %s\n"
+        "ESTAB: 0%-14s  TERM: %s\n"
         "AUT-SE%s\n"
         "CV-%s    DOC-%s\n"
         "%s            %s\n"
